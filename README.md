@@ -1,2 +1,2 @@
 # my-playground
-my golang playground
+My playground for programming language using go, php, etc
