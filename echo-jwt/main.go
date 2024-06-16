@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -57,7 +58,10 @@ func main() {
 		if !ok {
 			return errors.New("failed to cast claims as jwt.MapClaims")
 		}
-		return c.JSON(http.StatusOK, claims)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"type":   fmt.Sprintf("%T", claims["id"]),
+			"claims": claims,
+		})
 	})
 
 	if err := e.Start(":8080"); err != http.ErrServerClosed {
