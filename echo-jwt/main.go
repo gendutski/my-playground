@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -30,38 +29,66 @@ func main() {
 	e.Use(middleware.Recover())
 
 	e.GET("/", func(c echo.Context) error {
-		claims := jwt.MapClaims{
-			"id":    1,
-			"name":  "Firman Darmawan",
-			"email": "mvp.firman.darmawan@gmail.com",
-			"exp":   time.Now().Add(time.Minute).Unix(),
+		response := map[string]string{}
+
+		claims := map[string]jwt.MapClaims{
+			"validUser": {
+				"id":      1,
+				"name":    "Firman Darmawan",
+				"email":   "mvp.firman.darmawan@gmail.com",
+				"isValid": true,
+				"exp":     time.Now().Add(time.Minute * 2).Unix(),
+			},
+			"invalidUser": {
+				"id":      2,
+				"name":    "Firman Darmawan",
+				"email":   "firman@ruangguru.com",
+				"isValid": false,
+				"exp":     time.Now().Add(time.Minute * 2).Unix(),
+			},
+		}
+		for key, cl := range claims {
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, cl)
+			tokenStr, err := token.SignedString([]byte(secret))
+			if err != nil {
+				return err
+			}
+			response[key] = tokenStr
 		}
 
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-		tokenStr, err := token.SignedString([]byte(secret))
-		if err != nil {
-			return err
-		}
-		return c.JSON(http.StatusOK, map[string]string{"token": "Bearer " + tokenStr})
+		return c.JSON(http.StatusOK, response)
 	})
 
 	usrGroup := e.Group("/user", echojwt.WithConfig(echojwt.Config{
 		SigningKey: []byte(secret),
-		ContextKey: "user",
+		ContextKey: "userToken",
+		SuccessHandler: func(c echo.Context) {
+			token, ok := c.Get("userToken").(*jwt.Token) // by default token is stored under `user` key
+			if !ok {
+				c.Error(errors.New("JWT token missing or invalid"))
+			}
+			claims, ok := token.Claims.(jwt.MapClaims) // by default claims is of type `jwt.MapClaims`
+			if !ok {
+				c.Error(errors.New("failed to cast claims as jwt.MapClaims"))
+			}
+
+			if claims["isValid"].(bool) {
+				c.Set("user", User{
+					ID:    int(claims["id"].(float64)),
+					Name:  claims["name"].(string),
+					Email: claims["email"].(string),
+				})
+			} else {
+				c.Error(errors.New("user is invalid"))
+			}
+		},
 	}))
 	usrGroup.GET("", func(c echo.Context) error {
-		token, ok := c.Get("user").(*jwt.Token) // by default token is stored under `user` key
+		user, ok := c.Get("user").(User)
 		if !ok {
-			return errors.New("JWT token missing or invalid")
+			return errors.New("invalid user")
 		}
-		claims, ok := token.Claims.(jwt.MapClaims) // by default claims is of type `jwt.MapClaims`
-		if !ok {
-			return errors.New("failed to cast claims as jwt.MapClaims")
-		}
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"type":   fmt.Sprintf("%T", claims["id"]),
-			"claims": claims,
-		})
+		return c.JSON(http.StatusOK, user)
 	})
 
 	if err := e.Start(":8080"); err != http.ErrServerClosed {
