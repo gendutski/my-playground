@@ -12,19 +12,7 @@ type FileHook struct {
 	logLevels []logrus.Level
 }
 
-// NewFileHook create new FileHook
-func NewFileHook(logFile string, levels []logrus.Level) (*FileHook, error) {
-	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return nil, err
-	}
-	return &FileHook{
-		writer:    file,
-		logLevels: levels,
-	}, nil
-}
-
-// Fire menulis log ke file
+// Fire write log ke file
 func (hook *FileHook) Fire(entry *logrus.Entry) error {
 	line, err := entry.String()
 	if err != nil {
@@ -43,12 +31,25 @@ func main() {
 	// init logrus
 	logger := logrus.New()
 
-	// Added hook for error log
-	fileHook, err := NewFileHook("error.log", []logrus.Level{logrus.ErrorLevel, logrus.FatalLevel, logrus.PanicLevel})
+	// create log file
+	logFile := "error.log"
+	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		logger.Fatalf("Failed to create file hook: %v", err)
 	}
-	logger.AddHook(fileHook)
+	defer file.Close()
+
+	// Added hook for error log
+	logger.AddHook(&FileHook{
+		writer:    file,
+		logLevels: []logrus.Level{logrus.ErrorLevel, logrus.FatalLevel, logrus.PanicLevel},
+	})
+
+	logger.SetReportCaller(true)
+	logger.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp: true,
+		DisableColors: true,
+	})
 
 	// Sets the output for the terminal
 	logger.SetOutput(os.Stdout)
