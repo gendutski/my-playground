@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-	"gorm.io/gorm"
 )
 
 type result struct {
@@ -21,7 +20,6 @@ type result struct {
 
 func Test_Transfer(t *testing.T) {
 	db, cache := config.InitDB()
-	autoMigrate(db, t)
 
 	// init module
 	repo := module.NewRepository(db, cache)
@@ -130,21 +128,4 @@ func Test_Transfer(t *testing.T) {
 	}
 	assert.Equal(t, topup, total1)
 	assert.Equal(t, float64(10000), total3)
-}
-
-func autoMigrate(db *gorm.DB, t *testing.T) {
-	t.Log("Start migrate database")
-	for _, table := range []interface{}{
-		&module.User{},
-		&module.Wallet{},
-		&module.Transaction{},
-	} {
-		t.Logf("drop table %T", table)
-		db.Migrator().DropTable(table)
-		t.Logf("migrate table %T", table)
-		err := db.AutoMigrate(table)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
 }
