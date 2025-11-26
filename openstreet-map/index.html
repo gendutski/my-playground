@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OSM Search & Polygon</title>
+
+    <!-- Bootstrap 5 -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+    />
+
+    <!-- Leaflet -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+
+    <style>
+      #map {
+        height: 80vh;
+      }
+      .search-results {
+        position: absolute;
+        z-index: 9999;
+        background: white;
+        width: 100%;
+        max-height: 250px;
+        overflow-y: auto;
+        border: 1px solid #ddd;
+        display: none;
+      }
+      .search-item {
+        padding: 8px;
+        cursor: pointer;
+        border-bottom: 1px solid #eee;
+      }
+      .search-item:hover {
+        background: #f2f2f2;
+      }
+    </style>
+  </head>
+  <body class="p-3">
+    <div class="container-fluid mb-3">
+      <div class="row">
+        <div class="col-md-4 offset-md-4">
+          <input
+            id="searchBox"
+            class="form-control"
+            placeholder="Cari lokasi... (contoh: masjid al ikhlas cipinang melayu)"
+          />
+          <div id="searchResults" class="search-results"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+      // INIT MAP
+      const map = L.map("map").setView([-6.247012, 106.902326], 18);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 20,
+      }).addTo(map);
+
+      let searchTimeout = null;
+      let activePolygon = [];
+
+      const searchBox = document.getElementById("searchBox");
+      const searchResults = document.getElementById("searchResults");
+
+      // SEARCH FUNCTION
+      searchBox.addEventListener("input", function () {
+        const q = this.value.trim();
+        if (q.length < 3) {
+          searchResults.style.display = "none";
+          return;
+        }
+
+        if (searchTimeout) clearTimeout(searchTimeout);
+
+        searchTimeout = setTimeout(() => {
+          fetch(
+            `nominatim-proxy.php?q=${encodeURIComponent(q)}&polygon_geojson=1`
+          )
+            .then((r) => r.json())
+            .then((data) => {
+              searchResults.innerHTML = "";
+              searchResults.style.display = "block";
+              console.log(data);
+
+              data.forEach((item) => {
+                const div = document.createElement("div");
+                div.className = "search-item";
+                div.textContent = item.display_name;
+
+                div.addEventListener("click", () => {
+                  map.setView([item.lat, item.lon], 19);
+                  searchResults.style.display = "none";
+
+                  handleSelectResult(item);
+                });
+
+                searchResults.appendChild(div);
+              });
+            });
+        }, 300);
+      });
+
+      // When search result selected
+      function handleSelectResult(item) {
+        cleanActivePolygon();
+
+        // Display polygon from Nominatim if exists
+        if (item.geojson && item.geojson.type === "Polygon") {
+          activePolygon = L.polygon(
+            item.geojson.coordinates[0].map((c) => [c[1], c[0]]),
+            {
+              color: "blue",
+              weight: 2,
+            }
+          ).addTo(map);
+        }
+
+        // Click marker
+        const marker = L.marker([item.lat, item.lon]).addTo(map);
+        marker.bindPopup(`<strong>${item.display_name}</strong>`).openPopup();
+
+        marker.on("click", () => {
+          showSavePopup(item);
+        });
+      }
+
+      function cleanActivePolygon() {
+        while (activePolygon.length > 0) {
+          const polygonToRemove = activePolygon.pop();
+          map.removeLayer(polygonToRemove);
+        }
+      }
+
+      // When map clicked building -> load polygon using Overpass API
+      map.on("click", function (e) {
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+        console.log("loading....");
+
+        // Query Overpass to detect closest building polygon
+        const query = `
+            [out:json];
+            way(around:20, ${lat}, ${lon})["building"];
+            (._;>;);
+            out geom;
+        `;
+
+        fetch("https://overpass-api.de/api/interpreter", {
+          method: "POST",
+          body: query,
+        })
+          .then((r) => r.json())
+          .then((json) => {
+            console.log(json);
+            if (!json.elements || json.elements.length === 0) return;
+
+            // Remove previous polygon
+            cleanActivePolygon();
+
+            const ways = json.elements
+              .filter((el) => el.type === "way")
+              .forEach((way) => {
+                const wayId = way.id;
+
+                const coords = way.geometry.map((n) => [n.lat, n.lon]);
+
+                const polygonData = L.polygon(coords, {
+                  color: "red",
+                  weight: 2,
+                }).addTo(map);
+                activePolygon.push(polygonData);
+              });
+
+            // const way = json.elements.find((el) => el.type === "way");
+            // console.log(way);
+
+            // if (!way) return;
+
+            // const wayId = way.id;
+
+            // Remove previous polygon
+            // if (activePolygon) map.removeLayer(activePolygon);
+
+            // const coords = way.geometry.map((n) => [n.lat, n.lon]);
+            // activePolygon = L.polygon(coords, {
+            //   color: "red",
+            //   weight: 2,
+            // }).addTo(map);
+
+            // Popup ask save
+            // const center = activePolygon.getBounds().getCenter();
+            // const tempMarker = L.marker(center).addTo(map);
+
+            // tempMarker
+            //   .bindPopup(
+            //     `
+            //     <div>
+            //         <strong>Way ID: ${wayId}</strong><br>
+            //         Simpan way id ini?<br><br>
+            //         <button id="btnSaveWay" class="btn btn-sm btn-primary">Ya, simpan</button>
+            //     </div>
+            // `
+            //   )
+            //   .openPopup();
+
+            // tempMarker.on("popupopen", () => {
+            //   document.getElementById("btnSaveWay").onclick = () => {
+            //     console.log("Way ID disimpan:", wayId);
+            //     map.removeLayer(tempMarker);
+            //   };
+            // });
+          });
+      });
+
+      // Popup save on search result
+      function showSavePopup(item) {
+        const lat = item.lat;
+        const lon = item.lon;
+        const name = item.display_name;
+        const wayId = item.osm_id;
+
+        const tempMarker = L.marker([lat, lon]).addTo(map);
+
+        tempMarker
+          .bindPopup(
+            `
+            <div>
+                <strong>${name}</strong><br>
+                Way ID: ${wayId}<br>
+                Simpan way id ini?<br><br>
+                <button id="btnSaveSearchWay" class="btn btn-sm btn-primary">Ya, simpan</button>
+            </div>
+        `
+          )
+          .openPopup();
+
+        tempMarker.on("popupopen", () => {
+          document.getElementById("btnSaveSearchWay").onclick = () => {
+            console.log("Way ID disimpan:", wayId);
+            map.removeLayer(tempMarker);
+          };
+        });
+      }
+    </script>
+  </body>
+</html>
