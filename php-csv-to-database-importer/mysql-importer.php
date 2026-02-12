@@ -46,7 +46,7 @@ try {
         |--------------------------------------------------------------------------
         */
         $metaStmt = $pdo->prepare("
-            SELECT column_name, data_type
+            SELECT column_name, data_type, column_key
             FROM information_schema.columns
             WHERE table_schema = :db
               AND table_name   = :table
@@ -57,8 +57,12 @@ try {
         ]);
 
         $columnTypes = [];
+        $primaryKey = 'id';
         foreach ($metaStmt->fetchAll() as $col) {
             $columnTypes[$col['COLUMN_NAME']] = $col['DATA_TYPE'];
+            if ($col['COLUMN_KEY'] == 'PRI') {
+                $primaryKey = $col['COLUMN_NAME'];
+            }
         }
 
         if (!$columnTypes) {
@@ -76,7 +80,7 @@ try {
         $placeholders = array_map(fn($c) => ":" . $c, $columns);
 
         $sql = sprintf(
-            'INSERT IGNORE INTO `%s` (`%s`) VALUES (%s)',
+            'INSERT INTO `%s` (`%s`) VALUES (%s) ON DUPLICATE KEY UPDATE `' . $primaryKey . '` = `' . $primaryKey . '`',
             $table,
             implode('`,`', $columns),
             implode(',', $placeholders)
@@ -117,11 +121,15 @@ try {
                 elseif (in_array($type, ['decimal', 'numeric', 'float', 'double'])) {
                     $value = (float) $value;
                 }
-                // boolean (MySQL biasanya tinyint(1))
+                // boolean (MySQL usually tinyint(1))
                 elseif (in_array($type, ['boolean', 'tinyint'])) {
                     $value = in_array(strtolower((string) $value), ['1', 'true', 't', 'yes'], true) ? 1 : 0;
                 }
-                // date / datetime / json → biarkan string
+                // timestamp / datetime
+                elseif (in_array($type, ['timestamp', 'datetime'])) {
+                    $date = new DateTime($value);
+                    $value = $date->format('Y-m-d H:i:s');
+                }
 
                 $data[":" . $col] = $value;
             }
